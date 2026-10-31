@@ -1,5 +1,6 @@
 import { ShoppingCart, Archive } from 'lucide-react'
 import FavoriteButton from '../common/FavoriteButton'
+import LazyImage from '../common/LazyImage'
 import ShareButton from '../common/ShareButton'
 import { addToCart } from '../../utils/cartStorage'
 import { formatPrice, truncate } from '../../utils/helpers'
@@ -27,15 +28,7 @@ export default function GunCard({ gun, onSelect, onEdit, onDelete }) {
         onClick={() => onSelect(gun)}
         aria-label={`View ${gun.name}`}
       >
-        <img
-          className="card-img"
-          src={imgSrc}
-          alt={gun.name}
-          width="240"
-          height="180"
-          loading="lazy"
-          decoding="async"
-        />
+        <LazyImage className="card-img" src={imgSrc} alt={gun.name} width="240" height="180" />
 
         <span className="name display">{gun.name}</span>
 

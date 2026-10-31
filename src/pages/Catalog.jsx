@@ -26,7 +26,7 @@ const PAGE_SIZE = 6
 
 export default function Catalog({ onNavigate }) {
   // ---- API data (di-cache oleh TanStack Query) ----
-  const { guns: apiGuns, loading, fetching, error, refetch, updatedAt } = useGuns({ limit: 50 })
+  const { guns: apiGuns, loading, fetching, error, refetch, updatedAt, fromCache } = useGuns({ limit: 50 })
   const { archivedIds } = useArchive()
   const [useLocal, setUseLocal] = useState(false)
 
@@ -79,7 +79,7 @@ export default function Catalog({ onNavigate }) {
           }))
         }
       },
-      { rootMargin: '200px' },
+      { rootMargin: '0px' },
     )
     observer.observe(el)
     return () => observer.disconnect()
@@ -111,17 +111,21 @@ export default function Catalog({ onNavigate }) {
       </section>
 
       <section>
+        {!useLocal && updatedAt > 0 && (
+          <div className={`cache-status ${fromCache && !fetching ? 'cache-status--hit' : 'cache-status--miss'}`}>
+            {fetching
+              ? '🔄 Memperbarui data dari server…'
+              : fromCache
+                ? `⚡ Data dari cache — tidak ada request ke server (diambil ${new Date(updatedAt).toLocaleTimeString()}, segar 1 menit)`
+                : `🌐 Data baru diambil dari server (${new Date(updatedAt).toLocaleTimeString()}) — disimpan ke cache`}
+          </div>
+        )}
+
         <div className="list-head">
           <h2>Current stock</h2>
           <div className="list-head-right">
             <span className="count">
               {filteredGuns.length} piece{filteredGuns.length !== 1 ? 's' : ''}
-              {fetching && !loading && ' · refreshing…'}
-              {!fetching && updatedAt > 0 && !useLocal && (
-                <span className="cache-note" title="Data diambil dari cache, otomatis diperbarui setelah 1 menit">
-                  {' '}· cached {new Date(updatedAt).toLocaleTimeString()}
-                </span>
-              )}
             </span>
             {onNavigate && (
               <button

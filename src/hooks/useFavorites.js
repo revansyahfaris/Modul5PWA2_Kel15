@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import favoriteService from '../services/favoriteService'
 import { getUserIdentifier } from '../services/userService'
 
@@ -33,39 +34,32 @@ const writeLocalFavs = (ids) => {
 // ---------------------------------------------------------------------------
 
 export function useFavorites() {
-  const [favorites, setFavorites] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [isLocal, setIsLocal] = useState(false)
   const userIdentifier = getUserIdentifier()
 
-  const fetchFavorites = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      const response = await favoriteService.getFavorites(userIdentifier)
-
-      if (response.success) {
-        setFavorites(response.data || [])
-        setIsLocal(false)
-      } else {
-        throw new Error(response.message)
+  // Pakai cache TanStack Query dengan key yang sama di semua komponen
+  // (Header + setiap FavoriteButton), sehingga hanya ada SATU request
+  // favorites ke server, bukan satu request per kartu.
+  const query = useQuery({
+    queryKey: ['favorites', userIdentifier],
+    queryFn: async () => {
+      try {
+        const response = await favoriteService.getFavorites(userIdentifier)
+        if (!response.success) throw new Error(response.message)
+        return { list: response.data || [], isLocal: false }
+      } catch {
+        // Fallback to localStorage
+        return { list: readLocalFavs(), isLocal: true }
       }
-    } catch {
-      // Fallback to localStorage
-      setFavorites(readLocalFavs())
-      setIsLocal(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [userIdentifier])
+    },
+  })
 
-  useEffect(() => {
-    fetchFavorites()
-  }, [fetchFavorites])
-
-  return { favorites, loading, error, isLocal, refetch: fetchFavorites }
+  return {
+    favorites: query.data?.list || [],
+    loading: query.isLoading,
+    error: null,
+    isLocal: query.data?.isLocal || false,
+    refetch: query.refetch,
+  }
 }
 
 // ---------------------------------------------------------------------------

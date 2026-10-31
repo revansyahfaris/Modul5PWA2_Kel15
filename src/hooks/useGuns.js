@@ -31,6 +31,9 @@ export function useGuns(params = {}) {
       ? query.error.message || 'An error occurred while fetching products.'
       : null,
     updatedAt: query.dataUpdatedAt,
+    // true  = data di layar berasal dari cache (tidak ada request baru)
+    // false = data baru saja diambil dari server
+    fromCache: Boolean(query.data) && !query.isFetchedAfterMount,
     refetch: query.refetch,
   }
 }
