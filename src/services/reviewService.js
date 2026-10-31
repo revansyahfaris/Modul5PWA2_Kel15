@@ -1,4 +1,5 @@
 import { apiClient, IS_SUPABASE } from '../config/api'
+import { invalidateReviews } from '../lib/queryClient'
 
 // ---------------------------------------------------------------------------
 // ReviewService — product reviews & ratings.
@@ -18,10 +19,12 @@ class ReviewService {
         ? data.map((r) => ({
             id: r.id,
             product_id: r.product_id,
+            user_id: r.user_id,
             user_identifier: r.user_id ? `Operator ${String(r.user_id).substring(0, 8)}` : 'Anonymous',
             rating: r.rating,
             comment: r.comment || '',
             created_at: r.created_at,
+            updated_at: r.updated_at,
           }))
         : []
 
@@ -49,6 +52,7 @@ class ReviewService {
         headers: { Prefer: 'return=representation' },
       })
       const created = Array.isArray(res) ? res[0] : res
+      invalidateReviews(gunId)
       return { success: true, data: created }
     }
 
@@ -58,16 +62,21 @@ class ReviewService {
   /**
    * Edit an existing review.
    */
-  async updateReview(reviewId, reviewData) {
+  async updateReview(reviewId, reviewData, gunId) {
     if (IS_SUPABASE) {
       const res = await apiClient.patch(
-        `/rest/v1/reviews?id=eq.${reviewId}`,
+        `/rest/v1/reviews?id=eq.${reviewId}&user_id=eq.${reviewData.user_id}`,
         {
           rating: Number(reviewData.rating),
           comment: reviewData.comment,
         },
         { headers: { Prefer: 'return=representation' } },
       )
+      // PostgREST mengembalikan [] bila baris tidak ditemukan / ditolak RLS
+      if (Array.isArray(res) && res.length === 0) {
+        throw new Error('Review tidak bisa diubah (bukan milikmu atau ditolak server).')
+      }
+      invalidateReviews(gunId)
       return { success: true, data: Array.isArray(res) ? res[0] : res }
     }
 
@@ -77,9 +86,16 @@ class ReviewService {
   /**
    * Delete a review.
    */
-  async deleteReview(reviewId) {
+  async deleteReview(reviewId, gunId, userId) {
     if (IS_SUPABASE) {
-      await apiClient.delete(`/rest/v1/reviews?id=eq.${reviewId}`)
+      const ownerFilter = userId ? `&user_id=eq.${userId}` : ''
+      const res = await apiClient.delete(`/rest/v1/reviews?id=eq.${reviewId}${ownerFilter}`, {
+        headers: { Prefer: 'return=representation' },
+      })
+      if (Array.isArray(res) && res.length === 0) {
+        throw new Error('Review tidak bisa dihapus (bukan milikmu atau ditolak server).')
+      }
+      invalidateReviews(gunId)
       return { success: true }
     }
 

@@ -1,4 +1,5 @@
 import { apiClient, IS_SUPABASE } from '../config/api'
+import { invalidateGuns } from '../lib/queryClient'
 
 // ---------------------------------------------------------------------------
 // Normalizer — standardizes product shape whether received from Supabase
@@ -147,6 +148,7 @@ class GunService {
         headers: { Prefer: 'return=representation' },
       })
       const created = Array.isArray(res) ? res[0] : res
+      invalidateGuns()
       return { success: true, data: normalizeProduct(created) }
     }
     return apiClient.post('/api/v1/recipes', data)
@@ -180,6 +182,7 @@ class GunService {
         headers: { Prefer: 'return=representation' },
       })
       const updated = Array.isArray(res) ? res[0] : res
+      invalidateGuns()
       return { success: true, data: normalizeProduct(updated) }
     }
     return apiClient.put(`/api/v1/recipes/${id}`, data)
@@ -201,6 +204,7 @@ class GunService {
   async deleteGun(id) {
     if (IS_SUPABASE) {
       await apiClient.delete(`/rest/v1/products?id=eq.${id}`)
+      invalidateGuns()
       return { success: true }
     }
     return apiClient.delete(`/api/v1/recipes/${id}`)

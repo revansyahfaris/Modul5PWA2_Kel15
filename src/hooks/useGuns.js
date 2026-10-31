@@ -1,90 +1,59 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import gunService from '../services/gunService'
+import { queryKeys } from '../lib/queryClient'
 
 // ---------------------------------------------------------------------------
-// useGuns — fetch the paginated / filtered product list from the API.
+// useGuns — daftar produk, memakai TanStack Query (Query Caching).
+// Data disimpan di cache dengan key ['guns', params]; komponen lain yang
+// memakai params sama langsung mendapat data dari cache tanpa request baru.
 //
-// Returns { guns, loading, error, pagination, refetch }.
-// When the API is unreachable the `error` string will be set and `guns`
-// will remain an empty array so the UI can show a proper error state.
+// Returns { guns, loading, fetching, error, pagination, refetch, updatedAt }.
 // ---------------------------------------------------------------------------
 
 export function useGuns(params = {}) {
-  const [guns, setGuns] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [pagination, setPagination] = useState(null)
-
-  // Serialise params so the effect re-runs when they change.
-  const paramKey = JSON.stringify(params)
-
-  const fetchGuns = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
+  const query = useQuery({
+    queryKey: queryKeys.guns(params),
+    queryFn: async () => {
       const response = await gunService.getGuns(params)
-
-      if (response.success) {
-        setGuns(response.data || [])
-        setPagination(response.pagination || null)
-      } else {
-        setError(response.message || 'Failed to fetch products.')
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to fetch products.')
       }
-    } catch (err) {
-      setError(err.message || 'An error occurred while fetching products.')
-      setGuns([])
-    } finally {
-      setLoading(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paramKey])
+      return response
+    },
+  })
 
-  useEffect(() => {
-    fetchGuns()
-  }, [fetchGuns])
-
-  return { guns, loading, error, pagination, refetch: fetchGuns }
+  return {
+    guns: query.data?.data || [],
+    pagination: query.data?.pagination || null,
+    loading: query.isLoading,
+    fetching: query.isFetching,
+    error: query.error
+      ? query.error.message || 'An error occurred while fetching products.'
+      : null,
+    updatedAt: query.dataUpdatedAt,
+    refetch: query.refetch,
+  }
 }
 
 // ---------------------------------------------------------------------------
-// useGunById — fetch a single product by its UUID.
-//
-// Returns { gun, loading, error, refetch }.
+// useGunById — satu produk berdasarkan id (dipakai juga oleh share link).
 // ---------------------------------------------------------------------------
 
 export function useGunById(id) {
-  const [gun, setGun] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  const fetchGun = useCallback(async () => {
-    if (!id) {
-      setLoading(false)
-      return
-    }
-    try {
-      setLoading(true)
-      setError(null)
-
+  const query = useQuery({
+    queryKey: queryKeys.gun(id),
+    enabled: Boolean(id),
+    queryFn: async () => {
       const response = await gunService.getGunById(id)
+      if (!response.success) throw new Error(response.message || 'Product not found.')
+      return response.data
+    },
+  })
 
-      if (response.success) {
-        setGun(response.data)
-      } else {
-        setError(response.message || 'Product not found.')
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to load product details.')
-      setGun(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [id])
-
-  useEffect(() => {
-    fetchGun()
-  }, [fetchGun])
-
-  return { gun, loading, error, refetch: fetchGun }
+  return {
+    gun: query.data || null,
+    loading: query.isLoading,
+    error: query.error ? query.error.message || 'Failed to load product details.' : null,
+    refetch: query.refetch,
+  }
 }

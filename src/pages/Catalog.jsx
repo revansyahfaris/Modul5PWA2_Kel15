@@ -1,12 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { RefreshCw, Plus, Loader, AlertCircle, PackageOpen } from 'lucide-react'
 import { useGuns } from '../hooks/useGuns'
 import GUNS_LOCAL from '../data/guns'
 import GunCard from '../components/gun/GunCard'
-import GunDetail from '../components/gun/GunDetail'
 import AdvancedFilter from '../components/common/AdvancedFilter'
 import ConfirmModal from '../components/modals/ConfirmModal'
-import gunService from '../services/gunService'
+import { archiveGun, useArchive } from '../utils/archiveStorage'
 import {
   matchesSearch,
   matchesCategory,
@@ -23,9 +22,12 @@ import {
  *
  * Features: search, category filter, sort, CRUD actions, detail modal.
  */
+const PAGE_SIZE = 6
+
 export default function Catalog({ onNavigate }) {
-  // ---- API data ----
-  const { guns: apiGuns, loading, error, refetch } = useGuns({ limit: 50 })
+  // ---- API data (di-cache oleh TanStack Query) ----
+  const { guns: apiGuns, loading, fetching, error, refetch, updatedAt } = useGuns({ limit: 50 })
+  const { archivedIds } = useArchive()
   const [useLocal, setUseLocal] = useState(false)
 
   // Decide data source
@@ -47,44 +49,54 @@ export default function Catalog({ onNavigate }) {
 
   const filteredGuns = useMemo(() => {
     let result = rawGuns.filter(
-      (g) => matchesSearch(g, search) && matchesCategory(g, activeCategory),
+      (g) =>
+        !archivedIds.has(String(g.id)) &&
+        matchesSearch(g, search) &&
+        matchesCategory(g, activeCategory),
     )
     return sortItems(result, sortKey, sortOrder)
-  }, [rawGuns, search, activeCategory, sortKey, sortOrder])
+  }, [rawGuns, archivedIds, search, activeCategory, sortKey, sortOrder])
 
-  // ---- detail view ----
-  const [selectedGun, setSelectedGun] = useState(null)
+  // ---- Lazy load (Challenge 2): tampilkan 6 item dulu, sisanya dimuat
+  // otomatis saat user scroll mendekati bawah daftar (IntersectionObserver).
+  // Jumlah item yang tampil di-reset ke PAGE_SIZE setiap filter berubah.
+  const filterKey = `${search}|${activeCategory}|${sortKey}|${sortOrder}`
+  const [lazyState, setLazyState] = useState({ key: filterKey, count: PAGE_SIZE })
+  const visibleCount = lazyState.key === filterKey ? lazyState.count : PAGE_SIZE
+  const sentinelRef = useRef(null)
 
-  // ---- delete ----
-  const [deleteTarget, setDeleteTarget] = useState(null)
-  const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState('')
+  const hasMore = visibleCount < filteredGuns.length
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return
-    try {
-      setDeleting(true)
-      setDeleteError('')
-      await gunService.deleteGun(deleteTarget.id)
-      setDeleteTarget(null)
-      refetch()
-    } catch (err) {
-      setDeleteError(err.message || 'Failed to delete.')
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  // ---- If viewing a single product detail ----
-  if (selectedGun) {
-    return (
-      <GunDetail
-        gun={selectedGun}
-        onBack={() => setSelectedGun(null)}
-        onEdit={(g) => onNavigate && onNavigate('Edit', g)}
-        onDelete={(g) => { setSelectedGun(null); setDeleteTarget(g) }}
-      />
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setLazyState((st) => ({
+            key: filterKey,
+            count: (st.key === filterKey ? st.count : PAGE_SIZE) + PAGE_SIZE,
+          }))
+        }
+      },
+      { rootMargin: '200px' },
     )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, filteredGuns.length, filterKey])
+
+  const visibleGuns = filteredGuns.slice(0, visibleCount)
+
+  // ---- soft delete: pindahkan ke arsip ----
+  const [archiveTarget, setArchiveTarget] = useState(null)
+  const [toast, setToast] = useState('')
+
+  const handleArchive = () => {
+    if (!archiveTarget) return
+    archiveGun(archiveTarget)
+    setToast(`"${archiveTarget.name}" dipindahkan ke arsip.`)
+    setArchiveTarget(null)
+    setTimeout(() => setToast(''), 3000)
   }
 
   // ---- Main catalog view ----
@@ -104,6 +116,12 @@ export default function Catalog({ onNavigate }) {
           <div className="list-head-right">
             <span className="count">
               {filteredGuns.length} piece{filteredGuns.length !== 1 ? 's' : ''}
+              {fetching && !loading && ' · refreshing…'}
+              {!fetching && updatedAt > 0 && !useLocal && (
+                <span className="cache-note" title="Data diambil dari cache, otomatis diperbarui setelah 1 menit">
+                  {' '}· cached {new Date(updatedAt).toLocaleTimeString()}
+                </span>
+              )}
             </span>
             {onNavigate && (
               <button
@@ -166,16 +184,22 @@ export default function Catalog({ onNavigate }) {
         {/* Product grid */}
         {filteredGuns.length > 0 && (
           <ul className="stock">
-            {filteredGuns.map((gun) => (
+            {visibleGuns.map((gun) => (
               <GunCard
                 key={gun.id || gun.name}
                 gun={gun}
-                onSelect={setSelectedGun}
+                onSelect={(g) => onNavigate && onNavigate('Detail', g)}
                 onEdit={onNavigate ? (g) => onNavigate('Edit', g) : undefined}
-                onDelete={setDeleteTarget}
+                onDelete={setArchiveTarget}
               />
             ))}
           </ul>
+        )}
+
+        {hasMore && (
+          <div ref={sentinelRef} className="lazy-sentinel">
+            <Loader size={18} className="spin" /> Loading more…
+          </div>
         )}
 
         {useLocal && (
@@ -192,20 +216,17 @@ export default function Catalog({ onNavigate }) {
         )}
       </section>
 
-      {/* Delete confirmation */}
+      {/* Soft delete confirmation */}
       <ConfirmModal
-        open={!!deleteTarget}
-        title="Delete Product"
-        message={`Are you sure you want to delete "${deleteTarget?.name}"? This action cannot be undone.`}
-        confirmLabel="Delete"
-        danger
-        loading={deleting}
-        onConfirm={handleDelete}
-        onCancel={() => { setDeleteTarget(null); setDeleteError('') }}
+        open={!!archiveTarget}
+        title="Move to Archive"
+        message={`Pindahkan "${archiveTarget?.name}" ke arsip? Produk bisa di-restore dari Profile → Archive.`}
+        confirmLabel="Archive"
+        loading={false}
+        onConfirm={handleArchive}
+        onCancel={() => setArchiveTarget(null)}
       />
-      {deleteError && (
-        <div className="toast toast--error">{deleteError}</div>
-      )}
+      {toast && <div className="toast toast--success">{toast}</div>}
     </>
   )
 }
